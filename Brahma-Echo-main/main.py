@@ -408,12 +408,14 @@ def _clipboard_gemini_reply(text: str) -> str:
 
 def _looks_like_code_request(text: str) -> bool:
     low = (text or "").lower()
-    code_words = (
-        "build", "create", "write", "implement", "code", "python", "app",
-        "module", "function", "class", "project", "script", "api",
-        "ui", "webpage", "bot", "server", "service"
-    )
-    return any(word in low for word in code_words)
+    # A programming request needs both a build/action verb and a coding
+    # subject.  Substring matching made ordinary commands such as
+    # "open WhatsApp" match the letters "app" and incorrectly start BrahmaDev.
+    action_words = ("build", "create", "write", "implement", "code", "develop", "generate", "make", "fix", "edit")
+    code_subjects = ("python", "app", "module", "function", "class", "project", "script", "api", "ui", "webpage", "bot", "server", "service", "program")
+    has_action = any(re.search(rf"\b{re.escape(word)}\b", low) for word in action_words)
+    has_subject = any(re.search(rf"\b{re.escape(word)}\b", low) for word in code_subjects)
+    return has_action and has_subject
 
 
 def _looks_like_website_request(text: str) -> bool:
@@ -2575,7 +2577,7 @@ class BrahmaLive:
         self.ui.set_state("THINKING")
         asyncio.run_coroutine_threadsafe(
             self.session.send_client_content(
-                turns={"parts": [{"text": routed_text}]},
+                turns={"role": "user", "parts": [{"text": routed_text}]},
                 turn_complete=True
             ),
             self._loop
@@ -4185,7 +4187,10 @@ class BrahmaLive:
     async def _send_realtime(self):
         while True:
             msg = await self.out_queue.get()
-            await self.session.send_realtime_input(media=msg)
+            # Gemini 3 Live expects streamed microphone chunks through the
+            # dedicated audio field.  Passing a raw dict as generic media can
+            # produce a setup-valid but server-rejected realtime payload.
+            await self.session.send_realtime_input(audio=types.Blob(**msg))
 
     async def _listen_audio(self):
         print("[BRAHMA ECHO] 🎤 Mic started")
@@ -4205,7 +4210,7 @@ class BrahmaLive:
                 data = np.zeros_like(indata).tobytes()
                 loop.call_soon_threadsafe(
                     self.out_queue.put_nowait,
-                    {"data": data, "mime_type": "audio/pcm"}
+                    {"data": data, "mime_type": "audio/pcm;rate=16000"}
                 )
                 return
             
@@ -4233,7 +4238,7 @@ class BrahmaLive:
                     
                 loop.call_soon_threadsafe(
                     self.out_queue.put_nowait,
-                    {"data": data, "mime_type": "audio/pcm"}
+                    {"data": data, "mime_type": "audio/pcm;rate=16000"}
                 )
 
         try:
@@ -4348,9 +4353,9 @@ class BrahmaLive:
         try:
             while True:
                 chunk = await self.audio_in_queue.get()
-                with self._speaking_lock:
-                    if not self._is_speaking:
-                        continue
+                # Queued chunks are model audio.  Do not discard them just
+                # because a transcription/state event has not arrived yet.
+                # That race made valid replies silent on the selected headset.
                 self.set_speaking(True)
                 try:
                     pcm = np.frombuffer(chunk, dtype=np.int16)

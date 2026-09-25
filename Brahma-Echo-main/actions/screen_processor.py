@@ -247,6 +247,7 @@ class _LiveSession:
                     b64 = base64.b64encode(image_bytes).decode("utf-8")
                     await self._session.send_client_content(
                         turns={
+                            "role": "user",
                             "parts": [
                                 {"inline_data": {"mime_type": mime_type, "data": b64}},
                                 {"text": user_text}

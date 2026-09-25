@@ -8405,7 +8405,9 @@ class MainWindow(QMainWindow):
         self._current_file: str | None = None
         self._state = "LISTENING"
         self._left_collapsed  = False
-        self._right_collapsed = False
+        # Chat is the main dashboard workspace; the old narrow sidebar starts
+        # collapsed so the dashboard keeps its full usable width.
+        self._right_collapsed = True
         self._current_page = "dashboard"
         self._settings_bridge = None
         self._api_ready = False
@@ -8472,7 +8474,7 @@ class MainWindow(QMainWindow):
 
         self._btn_dashboard.clicked.connect(self._on_nav_dashboard)
         self._btn_home.clicked.connect(self._on_nav_home)
-        self._btn_chat.clicked.connect(self._toggle_right_sidebar)
+        self._btn_chat.clicked.connect(self._on_nav_chat)
         self._btn_settings.clicked.connect(self._on_nav_settings)
         self._update_nav_styles()
 
@@ -8842,6 +8844,14 @@ class MainWindow(QMainWindow):
     def _on_nav_dashboard(self):
         if hasattr(self, "_center_stack"):
             self._center_stack.setCurrentIndex(0)
+        self._update_nav_styles()
+
+    def _on_nav_chat(self):
+        """Bring the dashboard's full-size chat workspace into focus."""
+        if hasattr(self, "_center_stack"):
+            self._center_stack.setCurrentIndex(0)
+        if hasattr(self, "_inline_workspace") and hasattr(self._inline_workspace, "focus_input"):
+            self._inline_workspace.focus_input()
         self._update_nav_styles()
 
     def _on_nav_home(self):
@@ -9875,6 +9885,15 @@ class MainWindow(QMainWindow):
                 return lambda *args, **kwargs: None
         self.hud = _HudShim()
 
+        # Keep conversations in the dashboard centre rather than limiting them
+        # to the old narrow right sidebar.
+        self._inline_workspace = InlineChatWorkspace()
+        self._inline_workspace.attach_requested.connect(self._browse_attachment)
+        self._inline_workspace.mic_requested.connect(self._toggle_mute)
+        self._inline_workspace.command_submitted.connect(self._send)
+        self._log = self._inline_workspace
+        stage.addWidget(self._inline_workspace, stretch=1)
+
         command_row = QHBoxLayout()
         command_row.setContentsMargins(6, 0, 6, 0)
         command_row.setSpacing(12)
@@ -9973,12 +9992,9 @@ class MainWindow(QMainWindow):
         chat_lay.setContentsMargins(0, 4, 0, 0)
         chat_lay.setSpacing(8)
 
-        self._inline_workspace = InlineChatWorkspace()
-        self._inline_workspace.attach_requested.connect(self._browse_attachment)
-        self._inline_workspace.mic_requested.connect(self._toggle_mute)
-        self._inline_workspace.command_submitted.connect(self._send)
-        self._log = self._inline_workspace
-        chat_lay.addWidget(self._inline_workspace, stretch=1)
+        # Chat now lives in the full dashboard centre.  Keep this container
+        # available for sidebar-specific controls without reparenting it.
+        chat_lay.addWidget(QWidget(), stretch=1)
 
         self._settings_sidebar = SystemConnectivitySidebar()
         self._empty_right = QWidget()
