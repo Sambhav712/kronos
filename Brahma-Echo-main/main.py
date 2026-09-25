@@ -3425,7 +3425,9 @@ class BrahmaLive:
             request_text = f"{memory_ctx}\n\nCurrent User Request:\n{text}" if memory_ctx else text
             _system = (
                 "You are Brahma Echo, a concise, helpful desktop assistant. "
-                "Reply naturally and briefly. Do not mention internal implementation details."
+                "Reply naturally and briefly. Do not mention internal implementation details. "
+                "Match the user's language: answer English in English, and Hindi or Hinglish "
+                "in natural Roman Hinglish unless they explicitly request another language."
             )
 
             # ── Stage 1: Groq (primary — fastest via LPU) ──
@@ -4341,6 +4343,7 @@ class BrahmaLive:
 
         _spk_name = config_manager.get_output_device()
         _spk_dev = audio_devices.resolve(_spk_name, "output") if _spk_name else None
+        print(f"[BRAHMA ECHO] 🔊 Output device: {_spk_name or 'System default'} (index {_spk_dev})")
 
         stream = sd.RawOutputStream(
             samplerate=RECEIVE_SAMPLE_RATE,

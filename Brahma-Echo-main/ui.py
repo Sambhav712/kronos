@@ -8843,13 +8843,13 @@ class MainWindow(QMainWindow):
 
     def _on_nav_dashboard(self):
         if hasattr(self, "_center_stack"):
-            self._center_stack.setCurrentIndex(0)
+            self._center_stack.setCurrentIndex(5)
         self._update_nav_styles()
 
     def _on_nav_chat(self):
         """Bring the dashboard's full-size chat workspace into focus."""
         if hasattr(self, "_center_stack"):
-            self._center_stack.setCurrentIndex(0)
+            self._center_stack.setCurrentIndex(5)
         if hasattr(self, "_inline_workspace") and hasattr(self._inline_workspace, "focus_input"):
             self._inline_workspace.focus_input()
         self._update_nav_styles()
@@ -8872,7 +8872,7 @@ class MainWindow(QMainWindow):
     def _update_nav_styles(self):
         cur_idx = self._center_stack.currentIndex() if hasattr(self, "_center_stack") else 0
         if hasattr(self, "_btn_dashboard"):
-            if cur_idx == 0:
+            if cur_idx in (0, 5):
                 self._btn_dashboard.setStyleSheet(
                     f"QPushButton {{ background: rgba(255, 179, 0, 0.18); color: {C.PRI}; border: 1px solid {C.PRI}; border-radius: 8px; padding: 5px 15px; font-weight: bold; font-family: 'Segoe UI'; font-size: 13px; }}"
                 )
@@ -8911,7 +8911,7 @@ class MainWindow(QMainWindow):
     def _set_page(self, page: str):
         self._current_page = page
         if hasattr(self, "_center_stack") and isinstance(self._center_stack, QStackedWidget):
-            index = {"dashboard": 0, "home": 1, "devices": 2, "settings": 3}.get(page, 0)
+            index = {"dashboard": 5, "home": 1, "devices": 2, "settings": 3}.get(page, 5)
             self._center_stack.setCurrentIndex(index)
         if page == "devices" and hasattr(self, "_devices_page"):
             try:
@@ -9892,7 +9892,6 @@ class MainWindow(QMainWindow):
         self._inline_workspace.mic_requested.connect(self._toggle_mute)
         self._inline_workspace.command_submitted.connect(self._send)
         self._log = self._inline_workspace
-        stage.addWidget(self._inline_workspace, stretch=1)
 
         command_row = QHBoxLayout()
         command_row.setContentsMargins(6, 0, 6, 0)
@@ -9922,8 +9921,11 @@ class MainWindow(QMainWindow):
         
         self._settings_hub_page = SettingsHubPage(lambda idx: self._center_stack.setCurrentIndex(idx))
         self._center_stack.addWidget(self._settings_hub_page)
+        # Dedicated dashboard page: a chat workspace must be a direct stacked
+        # page, not a child competing with the dashboard HUD layout.
+        self._center_stack.addWidget(self._inline_workspace)
 
-        self._center_stack.setCurrentIndex(0)
+        self._center_stack.setCurrentIndex(5)
         return self._center_stack
 
     def _build_right_panel_modern(self) -> QWidget:
