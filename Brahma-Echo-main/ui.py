@@ -9100,6 +9100,26 @@ class MainWindow(QMainWindow):
         if path:
             self._on_file_selected(path)
 
+    def _on_file_selected(self, path: str):
+        """Remember an attachment so the next file command can use it.
+
+        The attach buttons in the newer chat layouts still called this method,
+        but it was lost while the old drop-zone UI was replaced.  Consequently
+        choosing a file crashed before the assistant ever received its path.
+        """
+        try:
+            selected = Path(path).expanduser().resolve()
+            if not selected.is_file():
+                self._log_sig.emit("ERR: The selected attachment is not a readable file.")
+                return
+            self._current_file = str(selected)
+            size = _fmt_size(selected.stat().st_size)
+            self._log_sig.emit(
+                f"SYS: Attached {selected.name} ({size}). Ask Brahma to analyze, summarize, or process it."
+            )
+        except OSError as exc:
+            self._log_sig.emit(f"ERR: Could not attach file: {exc}")
+
     def _toggle_mute(self):
         self._muted = not self._muted
         self._wakeword_listening = self._muted
@@ -9470,8 +9490,15 @@ class MainWindow(QMainWindow):
                 self.restored.emit()
 
     def _on_audio_level_sig(self, level: float):
-        if hasattr(self, "_bg_widget") and hasattr(self._bg_widget, "set_audio_level"):
-            self._bg_widget.set_audio_level(level)
+        # This signal can arrive from the audio callback while the WebEngine
+        # background is being recreated or the window is closing.  Never let a
+        # transient Qt wrapper error break the audio/UI event loop.
+        try:
+            background = getattr(self, "_bg_widget", None)
+            if background is not None and hasattr(background, "set_audio_level"):
+                background.set_audio_level(level)
+        except (RuntimeError, TypeError) as exc:
+            print(f"[BRAHMA ECHO] Audio visualizer unavailable: {exc}")
 
     def set_audio_level(self, level: float):
         try:
@@ -13373,7 +13400,8 @@ class BrahmaConnectDevicesPage(QFrame):
             self._onb_code_lbl.setText(code)
             self._onb_status_lbl.setText("WAITING FOR CONNECTION")
             
-            payload = self._onboarding_offer
+            # The compact payload avoids a needlessly dense, hard-to-scan QR.
+            payload = self._onboarding_offer.get("qr_payload") or self._onboarding_offer
             text = json.dumps(payload, sort_keys=True, ensure_ascii=False)
             if qrcode is not None:
                 qr = qrcode.QRCode(box_size=6, border=2, error_correction=qrcode.constants.ERROR_CORRECT_M)

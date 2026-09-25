@@ -244,7 +244,16 @@ class BrahmaGateway:
         advertised_host = local_ip() if self.config.host in {"0.0.0.0", "::"} else self.config.host
         offer = self.pairing_manager.create_offer(advertised_host, self.config.port)
         self._append_log("PAIRING_REQUEST", device=device_name, platform=platform, code=offer.pairing_code)
-        return offer.to_dict()
+        data = offer.to_dict()
+        # Keep the QR low-density so it can be read from a desktop monitor.
+        # The full response remains available for manual/API pairing.
+        data["qr_payload"] = {
+            "h": offer.host,
+            "p": offer.port,
+            "t": offer.pairing_token,
+            "c": offer.pairing_code,
+        }
+        return data
 
     def list_pending_requests(self) -> list[dict[str, Any]]:
         return [

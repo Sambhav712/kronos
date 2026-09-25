@@ -103,6 +103,8 @@ fun HolographicBackground() {
 
 @Composable
 fun BrahmaConnectApp(
+    cameraGranted: Boolean,
+    notificationsGranted: Boolean,
     onRequestCameraPermission: () -> Unit,
     onRequestNotificationPermission: () -> Unit,
     onStartService: () -> Unit,
@@ -128,9 +130,6 @@ fun BrahmaConnectApp(
         onDispose { discovery.stop() }
     }
 
-    val cameraGranted = remember { ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == android.content.pm.PackageManager.PERMISSION_GRANTED }
-    val notificationsGranted = remember { Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU || ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == android.content.pm.PackageManager.PERMISSION_GRANTED }
-    
     val setupMissing = listOfNotNull(
         if (!cameraGranted) "Camera" else null,
         if (!notificationsGranted) "Notifications" else null,

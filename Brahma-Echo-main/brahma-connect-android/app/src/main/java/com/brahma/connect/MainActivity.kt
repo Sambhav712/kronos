@@ -9,6 +9,9 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import com.brahma.connect.core.AgentStateStore
 import com.brahma.connect.pairing.PairingStorage
 import com.brahma.connect.ui.BrahmaConnectApp
@@ -17,12 +20,17 @@ import com.brahma.connect.ui.theme.BrahmaConnectTheme
 class MainActivity : ComponentActivity() {
     private lateinit var storage: PairingStorage
     private var pendingServiceStart = false
+    private var cameraGranted by mutableStateOf(false)
+    private var notificationsGranted by mutableStateOf(false)
 
-    private val cameraPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { _ ->
-        // The UI will react by showing the scanner if permission is granted.
+    private val cameraPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        // Compose observes this state, so Scan QR becomes usable immediately
+        // after the Android permission sheet is accepted.
+        cameraGranted = granted
     }
 
     private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        notificationsGranted = granted || Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU
         if (granted || Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
             if (pendingServiceStart) {
                 pendingServiceStart = false
@@ -37,6 +45,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        cameraGranted = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+        notificationsGranted = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
         storage = PairingStorage(this)
         AgentStateStore.setCredential(storage.loadCredential())
         storage.loadGatewayHint()?.let {
@@ -54,6 +65,8 @@ class MainActivity : ComponentActivity() {
         setContent {
             BrahmaConnectTheme {
                 BrahmaConnectApp(
+                    cameraGranted = cameraGranted,
+                    notificationsGranted = notificationsGranted,
                     onRequestCameraPermission = {
                         cameraPermission.launch(Manifest.permission.CAMERA)
                     },

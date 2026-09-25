@@ -37,6 +37,10 @@ def _load_api_key() -> str:
 
 
 TEXT_MODELS: list[str] = [
+    # OpenRouter maintains this router against its live free-model inventory.
+    # Prefer it to a brittle catalog of individual :free model IDs, which can
+    # be retired without notice and otherwise causes a chain of HTTP 404s.
+    "openrouter/free",
     "nvidia/nemotron-3-super-120b-a12b:free",
     "nousresearch/hermes-3-llama-3.1-405b:free",
     "minimax/minimax-m2.5:free",
@@ -62,6 +66,8 @@ TEXT_MODELS: list[str] = [
 ]
 
 VISION_MODELS: list[str] = [
+    # The free router filters for image-capable models for vision requests.
+    "openrouter/free",
     "nvidia/nemotron-nano-12b-v2-vl:free",
     "nvidia/llama-nemotron-embed-vl-1b-v2:free",
     "google/gemma-4-31b-it:free",

@@ -6,14 +6,36 @@ from typing import Any
 
 
 def local_ip() -> str:
+    """Return an address another device on the LAN can reach.
+
+    Pairing must work on a local Wi-Fi network even when the PC has no internet
+    route.  Falling back to 127.0.0.1 makes the QR point back to the phone.
+    """
+    candidates: list[str] = []
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
-        sock.connect(("8.8.8.8", 80))
-        return sock.getsockname()[0]
-    except Exception:
-        return "127.0.0.1"
+        # UDP connect sends no packet; this only selects Windows' active LAN
+        # adapter and does not depend on public internet reachability.
+        sock.connect(("192.0.2.1", 80))
+        candidates.append(sock.getsockname()[0])
+    except OSError:
+        pass
     finally:
         sock.close()
+
+    try:
+        candidates.extend(socket.gethostbyname_ex(socket.gethostname())[2])
+    except OSError:
+        pass
+
+    for address in candidates:
+        try:
+            if not address.startswith(("127.", "169.254.")):
+                socket.inet_aton(address)
+                return address
+        except OSError:
+            continue
+    return "127.0.0.1"
 
 
 @dataclass(slots=True)

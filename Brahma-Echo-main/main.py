@@ -4189,6 +4189,14 @@ class BrahmaLive:
     async def _send_realtime(self):
         while True:
             msg = await self.out_queue.get()
+            if msg.get("audio_stream_end"):
+                # Explicitly finish a local voice turn.  This is needed on
+                # some microphone/driver combinations where the server VAD
+                # keeps seeing the continuous stream of zero PCM frames and
+                # never finalizes the user's request.
+                await self.session.send_realtime_input(audio_stream_end=True)
+                print("[BRAHMA ECHO] 🎤 Voice turn sent to Gemini")
+                continue
             # Gemini 3 Live expects streamed microphone chunks through the
             # dedicated audio field.  Passing a raw dict as generic media can
             # produce a setup-valid but server-rejected realtime payload.
@@ -4201,8 +4209,21 @@ class BrahmaLive:
 
         _mic_name = config_manager.get_input_device()
         _mic_dev = audio_devices.resolve(_mic_name, "input") if _mic_name else None
+        print(f"[BRAHMA ECHO] 🎤 Input device: {_mic_name or 'System default'} (index {_mic_dev})")
+
+        last_status = ""
+        last_meter_log = 0.0
+        last_signal_seen = time.monotonic()
+        voice_active = False
+        last_voice_time = 0.0
 
         def callback(indata, frames, time_info, status):
+            nonlocal last_status, last_meter_log, last_signal_seen, voice_active, last_voice_time
+            if status:
+                message = str(status)
+                if message != last_status:
+                    last_status = message
+                    print(f"[BRAHMA ECHO] Mic status: {message}")
             with self._speaking_lock:
                 brahma_speaking = self._is_speaking
             if self._phone_active:
@@ -4218,6 +4239,31 @@ class BrahmaLive:
             
             if not self.ui.muted or getattr(self.ui, "_wakeword_listening", False):
                 lvl = float(np.sqrt(np.mean(np.square(indata, dtype=np.float32))))
+                now = time.monotonic()
+                if lvl >= 2.0:
+                    last_signal_seen = now
+                # A periodic RMS reading distinguishes a genuine silent/wrong
+                # Windows microphone from an STT/network issue without
+                # flooding the console from the real-time callback.
+                if now - last_meter_log >= 3.0:
+                    last_meter_log = now
+                    if now - last_signal_seen > 3.0:
+                        print("[BRAHMA ECHO] 🎤 No microphone signal detected — check Windows input privacy, mic volume, and selected device.")
+                    else:
+                        print(f"[BRAHMA ECHO] 🎤 Mic signal detected (RMS {lvl:.1f})")
+
+                # Hybrid VAD: stream all audio as before, then explicitly
+                # close a spoken turn after a short silence.  Gemini's server
+                # VAD remains enabled as a fallback.
+                if lvl > 2.0 and not brahma_speaking:
+                    voice_active = True
+                    last_voice_time = now
+                elif voice_active and now - last_voice_time >= 0.8:
+                    voice_active = False
+                    loop.call_soon_threadsafe(
+                        self.out_queue.put_nowait,
+                        {"audio_stream_end": True},
+                    )
                 
                 if brahma_speaking:
                     if self._echo.is_user_speech(indata, SEND_SAMPLE_RATE, lvl) and lvl > 28.0:
@@ -4233,7 +4279,10 @@ class BrahmaLive:
                             pass
                     if self._echo._hist:
                         self._echo.reset()
-                    if lvl > 10.0:
+                    # Some Realtek microphone arrays report a very low PCM
+                    # level despite clear speech.  The old 10.0 gate changed
+                    # that speech into zeroes before it reached Gemini.
+                    if lvl > 2.0:
                         data = indata.tobytes()
                     else:
                         data = np.zeros_like(indata).tobytes()
@@ -4243,18 +4292,37 @@ class BrahmaLive:
                     {"data": data, "mime_type": "audio/pcm;rate=16000"}
                 )
 
-        try:
-            with sd.InputStream(
+        def open_stream(device):
+            return sd.InputStream(
                 samplerate=SEND_SAMPLE_RATE,
                 channels=CHANNELS,
                 dtype="int16",
                 blocksize=CHUNK_SIZE,
-                device=_mic_dev,
+                device=device,
                 callback=callback,
-            ):
+            )
+
+        try:
+            try:
+                stream = open_stream(_mic_dev)
+                stream.start()
+            except Exception as exc:
+                if _mic_dev is None:
+                    raise
+                print(f"[BRAHMA ECHO] Selected mic failed ({exc}); using system default")
+                try:
+                    self.ui.write_log("WARN: Selected microphone unavailable; using system default microphone.")
+                except Exception:
+                    pass
+                stream = open_stream(None)
+                stream.start()
+            try:
                 print(f"[BRAHMA ECHO] 🎤 Mic stream open ({_mic_name or 'Default'})")
                 while True:
                     await asyncio.sleep(0.1)
+            finally:
+                stream.stop()
+                stream.close()
         except Exception as e:
             print(f"[BRAHMA ECHO] ❌ Mic: {e}")
             raise
