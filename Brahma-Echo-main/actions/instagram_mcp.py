@@ -29,7 +29,10 @@ try:
     from instagrapi import Client
     INSTAGRAPI_AVAILABLE = True
 except ImportError:
-    Client = Any  # type: ignore
+    class _ClientStub:  # noqa: N801
+        """Placeholder when instagrapi is not installed."""
+        pass
+    Client = _ClientStub  
     INSTAGRAPI_AVAILABLE = False
 
 
@@ -398,11 +401,12 @@ class InstagramService:
             if SESSION_PATH.exists():
                 try:
                     self._client.load_settings(SESSION_PATH)
-                    default_cl = Client()
-                    if getattr(default_cl, "user_agent", None):
-                        self._client.user_agent = default_cl.user_agent
-                    if getattr(default_cl, "app_id", None):
-                        self._client.app_id = default_cl.app_id
+                    if INSTAGRAPI_AVAILABLE:
+                        default_cl = Client()
+                        if getattr(default_cl, "user_agent", None):
+                            self._client.user_agent = default_cl.user_agent
+                        if getattr(default_cl, "app_id", None):
+                            self._client.app_id = default_cl.app_id
 
                     if getattr(self._client, "user_id", None):
                         try:
