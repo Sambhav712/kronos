@@ -6,6 +6,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import threading
 import time
 import wave
@@ -32,7 +33,7 @@ def _base_dir() -> Path:
 
 BASE_DIR = _base_dir()
 API_CONFIG_PATH = get_user_data_dir() / "config" / "api_keys.json"
-LIVE_MODEL = "models/gemini-2.5-flash-native-audio-preview-12-2025"
+LIVE_MODEL = "gemini-3.8-live"
 IMG_MAX_W = 1280
 IMG_MAX_H = 720
 JPEG_Q = 72
@@ -262,7 +263,7 @@ class MeetingAssistant:
         extra = None
         if loopback:
             try:
-                extra = sd.WasapiSettings(loopback=True)
+                extra = sd.WasapiSettings()
             except Exception:
                 extra = None
 

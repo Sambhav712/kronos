@@ -32,7 +32,7 @@ def get_base_dir():
 BASE_DIR        = get_base_dir()
 API_CONFIG_PATH = get_user_data_dir() / "config" / "api_keys.json"
 
-LIVE_MODEL          = "models/gemini-2.5-flash-native-audio-preview-12-2025"
+LIVE_MODEL          = "gemini-3.8-live"
 CHANNELS            = 1
 RECEIVE_SAMPLE_RATE = 24000
 CHUNK_SIZE          = 1024

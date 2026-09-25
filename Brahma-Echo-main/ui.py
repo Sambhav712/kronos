@@ -2006,9 +2006,13 @@ class GestureCameraPreview(QFrame):
             else:
                 vision = None
                 try:
-                    vision = importlib.import_module("mediapipe.tasks.python.vision")
+                    from mediapipe.tasks.python import vision as _v
+                    vision = _v
                 except Exception:
-                    vision = None
+                    try:
+                        vision = getattr(getattr(mp, "tasks", None), "vision", None)
+                    except Exception:
+                        vision = None
 
                 if vision is None or not hasattr(vision, "HandLandmarker"):
                     self._set_status(
@@ -2042,8 +2046,11 @@ class GestureCameraPreview(QFrame):
         if self._use_tasks_api:
             try:
                 import numpy as np
-                image_lib = importlib.import_module("mediapipe.tasks.python.vision.core.image")
-                mp_image = image_lib.Image(image_lib.ImageFormat.SRGB, np.ascontiguousarray(rgb))
+                if hasattr(mp, "Image") and hasattr(mp, "ImageFormat"):
+                    mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=np.ascontiguousarray(rgb))
+                else:
+                    image_lib = importlib.import_module("mediapipe.tasks.python.vision.core.image")
+                    mp_image = image_lib.Image(image_lib.ImageFormat.SRGB, np.ascontiguousarray(rgb))
                 results = self._hands.detect(mp_image)
             except Exception as exc:
                 self._set_status(f"Gesture task detect error: {exc}", "lost")
@@ -8339,12 +8346,14 @@ class FloatingGestureCard(QWidget):
             )
         else:
             self.preview.show()
+            self.preview.raise_()
             self.preview._start_camera()
             self.btn.setStyleSheet(
                 "QPushButton { background: rgba(255, 179, 0, 0.15); color: #ffb300; border: 1px solid #ffb300; border-radius: 8px; font-weight: bold; }"
                 "QPushButton:hover { background: rgba(255, 179, 0, 0.25); }"
             )
         self.adjustSize()
+        self.raise_()
         if self.window() and hasattr(self.window(), 'resizeEvent'):
             self.window().resizeEvent(None)
 
@@ -8427,10 +8436,11 @@ class MainWindow(QMainWindow):
         taskbar_lay.setContentsMargins(10, 10, 10, 10)
         
         self._btn_dashboard = QPushButton("Dashboard")
+        self._btn_home = QPushButton("Smart Devices")
         self._btn_chat = QPushButton("Chat")
         self._btn_settings = QPushButton("Settings")
 
-        for btn in (self._btn_dashboard, self._btn_chat, self._btn_settings):
+        for btn in (self._btn_dashboard, self._btn_home, self._btn_chat, self._btn_settings):
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.setStyleSheet(f"QPushButton {{ background: rgba(12,14,18,200); color: {C.WHITE}; border: 1px solid {C.BORDER_B}; border-radius: 8px; padding: 5px 15px; font-weight: bold; font-family: 'Segoe UI'; font-size: 13px; }} QPushButton:hover {{ color: {C.PRI}; border: 1px solid {C.PRI}; }}")
         
@@ -8442,6 +8452,7 @@ class MainWindow(QMainWindow):
         taskbar_lay.addWidget(self._status_badge)
         taskbar_lay.addStretch()
         taskbar_lay.addWidget(self._btn_dashboard)
+        taskbar_lay.addWidget(self._btn_home)
         taskbar_lay.addWidget(self._btn_chat)
         taskbar_lay.addWidget(self._btn_settings)
         taskbar_lay.addStretch()
@@ -8460,6 +8471,7 @@ class MainWindow(QMainWindow):
         body.addWidget(self._right_panel, stretch=0)
 
         self._btn_dashboard.clicked.connect(self._on_nav_dashboard)
+        self._btn_home.clicked.connect(self._on_nav_home)
         self._btn_chat.clicked.connect(self._toggle_right_sidebar)
         self._btn_settings.clicked.connect(self._on_nav_settings)
         self._update_nav_styles()
@@ -8832,6 +8844,16 @@ class MainWindow(QMainWindow):
             self._center_stack.setCurrentIndex(0)
         self._update_nav_styles()
 
+    def _on_nav_home(self):
+        if hasattr(self, "_center_stack"):
+            self._center_stack.setCurrentIndex(1)
+        if hasattr(self, "_home_page") and hasattr(self._home_page, "_refresh"):
+            try:
+                self._home_page._refresh()
+            except Exception:
+                pass
+        self._update_nav_styles()
+
     def _on_nav_settings(self):
         if hasattr(self, "_center_stack"):
             self._center_stack.setCurrentIndex(4)
@@ -8846,6 +8868,15 @@ class MainWindow(QMainWindow):
                 )
             else:
                 self._btn_dashboard.setStyleSheet(
+                    f"QPushButton {{ background: rgba(12,14,18,200); color: {C.WHITE}; border: 1px solid {C.BORDER_B}; border-radius: 8px; padding: 5px 15px; font-weight: bold; font-family: 'Segoe UI'; font-size: 13px; }} QPushButton:hover {{ color: {C.PRI}; border: 1px solid {C.PRI}; }}"
+                )
+        if hasattr(self, "_btn_home"):
+            if cur_idx in (1, 2):
+                self._btn_home.setStyleSheet(
+                    f"QPushButton {{ background: rgba(255, 179, 0, 0.18); color: {C.PRI}; border: 1px solid {C.PRI}; border-radius: 8px; padding: 5px 15px; font-weight: bold; font-family: 'Segoe UI'; font-size: 13px; }}"
+                )
+            else:
+                self._btn_home.setStyleSheet(
                     f"QPushButton {{ background: rgba(12,14,18,200); color: {C.WHITE}; border: 1px solid {C.BORDER_B}; border-radius: 8px; padding: 5px 15px; font-weight: bold; font-family: 'Segoe UI'; font-size: 13px; }} QPushButton:hover {{ color: {C.PRI}; border: 1px solid {C.PRI}; }}"
                 )
         if hasattr(self, "_btn_settings"):
