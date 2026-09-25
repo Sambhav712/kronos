@@ -1,0 +1,226 @@
+from core.user_paths import get_user_data_dir
+import json
+import re
+import sys
+from pathlib import Path
+from enum import Enum
+
+
+def get_base_dir() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).parent
+    return Path(__file__).resolve().parent.parent
+
+
+BASE_DIR        = get_base_dir()
+API_CONFIG_PATH = get_user_data_dir() / "config" / "api_keys.json"
+
+try:
+    from groq_client import client as groq_client
+except ImportError:
+    try:
+        sys.path.insert(0, str(BASE_DIR))
+        from groq_client import client as groq_client
+    except Exception:
+        groq_client = None
+
+
+class ErrorDecision(Enum):
+    RETRY       = "retry"      
+    SKIP        = "skip"       
+    REPLAN      = "replan"     
+    ABORT       = "abort"    
+
+
+ERROR_ANALYST_PROMPT = """You are the error recovery module of KRONOS AI AI assistant.
+
+A task step has failed. Analyze the error and decide what to do.
+
+DECISIONS:
+- retry   : Transient error (network timeout, temporary file lock, race condition).
+             The same step can succeed if tried again.
+- skip    : This step is not critical and the task can succeed without it.
+- replan  : The approach was wrong. A different tool or method should be tried.
+- abort   : The task is fundamentally impossible or unsafe to continue.
+
+Also provide:
+- A brief explanation of WHY it failed (1 sentence)
+- A fix suggestion if decision is replan (what to try instead)
+- Max retries: how many times to retry if decision is retry (1 or 2)
+
+Return ONLY valid JSON:
+{
+  "decision": "retry|skip|replan|abort",
+  "reason": "why it failed",
+  "fix_suggestion": "what to try instead (for replan)",
+  "max_retries": 1,
+  "user_message": "Short message to tell the user (max 15 words)"
+}
+"""
+
+
+def _get_api_key() -> str:
+    with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
+        return json.load(f)["gemini_api_key"]
+
+
+def analyze_error(
+    step: dict,
+    error: str,
+    attempt: int = 1,
+    max_attempts: int = 2
+) -> dict:
+    """
+    Analyzes a failed step and returns a recovery decision.
+
+    Args:
+        step         : The step dict that failed
+        error        : Error message/traceback
+        attempt      : Current attempt number
+        max_attempts : How many times we've already tried
+
+    Returns:
+        {
+            "decision": ErrorDecision,
+            "reason": str,
+            "fix_suggestion": str,
+            "max_retries": int,
+            "user_message": str
+        }
+    """
+    import google.generativeai as genai
+
+    if attempt >= max_attempts:
+        print(f"[ErrorHandler] ⚠️ Max attempts reached for step {step.get('step')} — forcing replan")
+        return {
+            "decision":      ErrorDecision.REPLAN,
+            "reason":        f"Failed {attempt} times: {error[:100]}",
+            "fix_suggestion": "Try a completely different approach or tool",
+            "max_retries":   0,
+            "user_message":  "Trying a different approach, sir."
+        }
+
+    prompt = f"""Failed step:
+Tool: {step.get('tool')}
+Description: {step.get('description')}
+Parameters: {json.dumps(step.get('parameters', {}), indent=2)}
+Critical: {step.get('critical', False)}
+
+Error:
+{error[:500]}
+
+Attempt number: {attempt}"""
+
+    decision_map = {
+        "retry":  ErrorDecision.RETRY,
+        "skip":   ErrorDecision.SKIP,
+        "replan": ErrorDecision.REPLAN,
+        "abort":  ErrorDecision.ABORT,
+    }
+
+    # ── Stage 1: Groq (primary — llama-3.3-70b-versatile) ──
+    try:
+        if groq_client:
+            groq_client.reload_key()
+            if groq_client.is_configured():
+                result = groq_client.chat_json(
+                    prompt=prompt,
+                    system=ERROR_ANALYST_PROMPT,
+                    model="llama-3.3-70b-versatile",
+                )
+                if result and isinstance(result, dict) and "decision" in result:
+                    decision_str = str(result.get("decision", "replan")).lower()
+                    result["decision"] = decision_map.get(decision_str, ErrorDecision.REPLAN)
+                    if step.get("critical") and result["decision"] == ErrorDecision.SKIP:
+                        result["decision"]     = ErrorDecision.REPLAN
+                        result["user_message"] = "This step is critical — finding alternative approach, sir."
+                    print(f"[ErrorHandler] Decision (via Groq): {result['decision'].value} — {result.get('reason', '')}")
+                    return result
+    except Exception as e:
+        print(f"[ErrorHandler] ⚠️ Groq error analysis failed: {e}")
+
+    # ── Stage 2: Gemini (secondary fallback) ──
+    try:
+        import google.generativeai as genai
+        genai.configure(api_key=_get_api_key())
+        model = genai.GenerativeModel(
+            model_name="gemini-3.1-flash-lite",
+            system_instruction=ERROR_ANALYST_PROMPT
+        )
+        response = model.generate_content(prompt)
+        text     = response.text.strip()
+        text     = re.sub(r"```(?:json)?", "", text).strip().rstrip("`").strip()
+
+        result = json.loads(text)
+        decision_str = result.get("decision", "replan").lower()
+        result["decision"] = decision_map.get(decision_str, ErrorDecision.REPLAN)
+
+        if step.get("critical") and result["decision"] == ErrorDecision.SKIP:
+            result["decision"]     = ErrorDecision.REPLAN
+            result["user_message"] = "This step is critical — finding alternative approach, sir."
+
+        print(f"[ErrorHandler] Decision (via Gemini): {result['decision'].value} — {result.get('reason', '')}")
+        return result
+
+    except Exception as e:
+        print(f"[ErrorHandler] ⚠️ Analysis failed: {e} — defaulting to replan")
+        return {
+            "decision":       ErrorDecision.REPLAN,
+            "reason":         str(e),
+            "fix_suggestion": "Try alternative approach",
+            "max_retries":    1,
+            "user_message":   "Encountered an issue, adjusting approach, sir."
+        }
+
+
+def generate_fix(step: dict, error: str, fix_suggestion: str) -> dict:
+    """
+    When decision is REPLAN and a fix suggestion exists,
+    generates a replacement step using generated_code as fallback.
+
+    Returns a modified step dict.
+    """
+    import google.generativeai as genai
+
+    genai.configure(api_key=_get_api_key())
+    model = genai.GenerativeModel(model_name="gemini-3.1-flash-lite")
+
+    prompt = f"""A task step failed. Generate a replacement step.
+
+Original step:
+Tool: {step.get('tool')}
+Description: {step.get('description')}
+Parameters: {json.dumps(step.get('parameters', {}), indent=2)}
+
+Error: {error[:300]}
+Fix suggestion: {fix_suggestion}
+
+Write a Python script that accomplishes the same goal differently.
+Return ONLY the Python code, no explanation."""
+
+    try:
+        response = model.generate_content(prompt)
+        code = response.text.strip()
+        code = re.sub(r"```(?:python)?", "", code).strip().rstrip("`").strip()
+
+        return {
+            "step":        step.get("step"),
+            "tool":        "claude_code",
+            "description": f"Auto-fix for: {step.get('description')}",
+            "parameters": {
+                "description": fix_suggestion,
+            },
+            "depends_on": step.get("depends_on", []),
+            "critical":   step.get("critical", False)
+        }
+
+    except Exception as e:
+        print(f"[ErrorHandler] ⚠️ Fix generation failed: {e}")
+        return {
+            "step":        step.get("step"),
+            "tool":        "generated_code",
+            "description": f"Fallback for: {step.get('description')}",
+            "parameters":  {"description": step.get("description", "")},
+            "depends_on":  step.get("depends_on", []),
+            "critical":    step.get("critical", False)
+        }
