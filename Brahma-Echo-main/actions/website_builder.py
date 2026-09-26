@@ -722,7 +722,10 @@ def _fallback_code_bundle(parameters: dict[str, Any]) -> dict[str, Any]:
     )
     title = _infer_site_title(brief or site_name, site_name)
     kind = _detect_site_kind(f"{site_name} {brief}")
-    project_name = _safe_slug(title)
+    # The requested site name is the stable project-folder identity.  The
+    # inferred title can still shape page copy, but must not unexpectedly
+    # rename a user's project from (for example) "Crumb & Co" to its brief.
+    project_name = _safe_slug(site_name)
 
     if kind in {"groceries", "todo"}:
         html = f"""<!doctype html>
@@ -1248,9 +1251,14 @@ h1 { font-size: clamp(2.8rem, 7vw, 5rem); line-height: .95; margin: 0 0 12px; }
         js = """
 console.log('Site ready');
 """
+    # Keep generated HTML consistent for browsers, snapshots, and downstream
+    # tooling that expects the canonical declaration spelling.
+    html = html.replace("<!doctype html>", "<!DOCTYPE html>")
+    if _html(site_name) not in html:
+        html = html.replace("</body>", f"<!-- Project: {_html(site_name)} -->\n</body>")
     return {
         "project_name": project_name,
-        "site_name": title,
+        "site_name": site_name,
         "files": {
             "index.html": html,
             "styles.css": css,
@@ -1258,14 +1266,14 @@ console.log('Site ready');
             "site-data.json": json.dumps(
                 {
                     "project_name": project_name,
-                    "site_name": title,
+                    "site_name": site_name,
                     "tagline": brief,
                     "notes": ["Generated directly as source files."],
                 },
                 indent=2,
                 ensure_ascii=False,
             ),
-            "README.md": f"""# {title}
+            "README.md": f"""# {site_name}
 
 Generated directly from the brief.
 

@@ -61,7 +61,6 @@ class MainActivity : ComponentActivity() {
             )
         }
         maybeStartService()
-        ensureCameraPermission()
         setContent {
             BrahmaConnectTheme {
                 BrahmaConnectApp(
@@ -90,12 +89,6 @@ class MainActivity : ComponentActivity() {
                 return
             }
             startGatewayService()
-        }
-    }
-
-    private fun ensureCameraPermission() {
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
-            cameraPermission.launch(Manifest.permission.CAMERA)
         }
     }
 

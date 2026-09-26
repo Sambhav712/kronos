@@ -44,6 +44,10 @@ def _get_base_dir() -> Path:
 
 BASE_DIR = _get_base_dir()
 CONFIG_PATH = get_user_data_dir() / "config" / "api_keys.json"
+# Older Settings Hub builds saved keys beside the application source. Keep
+# reading that location during migration so existing Instagram connections do
+# not appear disconnected after moving configuration to LocalAppData.
+LEGACY_CONFIG_PATH = BASE_DIR / "config" / "api_keys.json"
 SESSION_PATH = get_user_data_dir() / "config" / "ig_session.json"
 BROWSER_PROFILE_DIR = get_user_data_dir() / "config" / "ig_browser_profile"
 LOG_PATH = BASE_DIR / "ig_debug.log"
@@ -369,13 +373,18 @@ class InstagramService:
             return self._browser_worker
 
     def load_credentials(self) -> Tuple[str, str]:
-        try:
-            if CONFIG_PATH.exists():
-                with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+        for path in (CONFIG_PATH, LEGACY_CONFIG_PATH):
+            try:
+                if not path.exists():
+                    continue
+                with open(path, "r", encoding="utf-8") as f:
                     data = json.load(f)
-                    return data.get("instagram_username", "").strip(), data.get("instagram_password", "").strip()
-        except Exception as e:
-            ig_log(f"Error reading credentials: {e}")
+                username = str(data.get("instagram_username") or "").strip()
+                password = str(data.get("instagram_password") or "").strip()
+                if username and password:
+                    return username, password
+            except Exception as e:
+                ig_log(f"Error reading credentials from {path}: {e}")
         return "", ""
 
     def get_client(self, require_auth: bool = True) -> Client:

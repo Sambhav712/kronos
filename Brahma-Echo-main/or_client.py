@@ -41,41 +41,11 @@ TEXT_MODELS: list[str] = [
     # Prefer it to a brittle catalog of individual :free model IDs, which can
     # be retired without notice and otherwise causes a chain of HTTP 404s.
     "openrouter/free",
-    "nvidia/nemotron-3-super-120b-a12b:free",
-    "nousresearch/hermes-3-llama-3.1-405b:free",
-    "minimax/minimax-m2.5:free",
-    "meta-llama/llama-3.3-70b-instruct:free",
-    "qwen/qwen3-next-80b-a3b-instruct:free",
-    "qwen/qwen3-coder:free",
-    "google/gemma-4-31b-it:free",
-    "google/gemma-4-26b-a4b-it:free",
-    "google/gemma-3-27b-it:free",
-    "arcee-ai/trinity-large-preview:free",
-    "z-ai/glm-4.5-air:free",
-    "nvidia/nemotron-3-nano-30b-a3b:free",
-    "cognitivecomputations/dolphin-mistral-24b-venice-edition:free",
-    "google/gemma-3-12b-it:free",
-    "nvidia/nemotron-nano-12b-v2-vl:free",
-    "nvidia/nemotron-nano-9b-v2:free",
-    "google/gemma-3-4b-it:free",
-    "google/gemma-3n-e4b-it:free",
-    "meta-llama/llama-3.2-3b-instruct:free",
-    "google/gemma-3n-e2b-it:free",
-    "liquid/lfm-2.5-1.2b-instruct:free",
-    "liquid/lfm-2.5-1.2b-thinking:free",
 ]
 
 VISION_MODELS: list[str] = [
     # The free router filters for image-capable models for vision requests.
     "openrouter/free",
-    "nvidia/nemotron-nano-12b-v2-vl:free",
-    "nvidia/llama-nemotron-embed-vl-1b-v2:free",
-    "google/gemma-4-31b-it:free",
-    "google/gemma-4-26b-a4b-it:free",
-    "google/gemma-3n-e4b-it:free",
-    "google/gemma-3n-e2b-it:free",
-    "meta-llama/llama-3.3-70b-instruct:free",
-    "nvidia/nemotron-3-super-120b-a12b:free",
 ]
 
 API_URL               = "https://openrouter.ai/api/v1/chat/completions"

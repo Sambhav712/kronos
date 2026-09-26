@@ -302,8 +302,13 @@ def _query() -> dict[str, list[str]]:
                 found = _collect(api_filter, kind)
                 if not found:
                     continue
-                # One probe per API per direction, cached, on this thread.
-                if not _transport_works(found[0][0], kind, (api_filter, kind)):
+                # An output driver can claim success while dropping every
+                # sample, so it needs a transport probe.  Input is different:
+                # Windows privacy, a hardware mute switch, or a quiet room can
+                # legitimately deliver zero frames during this short probe.
+                # Rejecting it here made the microphone picker empty exactly
+                # when a user needed it to choose the right device.
+                if kind == "output" and not _transport_works(found[0][0], kind, (api_filter, kind)):
                     continue
                 _chosen_api[kind] = api_filter
                 out[kind] = [_display_name(n, devices) for _i, n in found]

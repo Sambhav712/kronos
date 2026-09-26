@@ -130,19 +130,13 @@ fun BrahmaConnectApp(
         onDispose { discovery.stop() }
     }
 
-    val setupMissing = listOfNotNull(
-        if (!cameraGranted) "Camera" else null,
-        if (!notificationsGranted) "Notifications" else null,
-    )
-
     val navController = rememberNavController()
 
-    // Determine start destination
-    val startDest = when {
-        setupMissing.isNotEmpty() -> "permissions"
-        credential != null -> "home"
-        else -> "welcome"
-    }
+    // Camera is only needed for QR scanning and notification permission is
+    // only needed when the foreground bridge starts.  Blocking the whole app
+    // here made Manual IP and LAN discovery unusable after a user declined
+    // either optional permission.
+    val startDest = if (credential != null) "home" else "welcome"
 
     LaunchedEffect(credential) {
         if (credential != null && navController.currentDestination?.route != "home" && navController.currentDestination?.route != "connected_anim") {
@@ -166,7 +160,6 @@ fun BrahmaConnectApp(
         ) {
             composable("permissions") {
                 StartupPermissionsScreen(
-                    missingItems = setupMissing,
                     cameraGranted = cameraGranted,
                     notificationsGranted = notificationsGranted,
                     onRequestCameraPermission = onRequestCameraPermission,
@@ -383,7 +376,6 @@ fun ConnectedAnimatedScreen(onFinished: () -> Unit) {
 
 @Composable
 private fun StartupPermissionsScreen(
-    missingItems: List<String>,
     cameraGranted: Boolean,
     notificationsGranted: Boolean,
     onRequestCameraPermission: () -> Unit,
@@ -417,10 +409,9 @@ private fun StartupPermissionsScreen(
         }
         Button(
             onClick = onContinue,
-            enabled = missingItems.isEmpty(),
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Text(if (missingItems.isEmpty()) "Continue" else "Finish Setup First")
+            Text("Continue")
         }
     }
 }

@@ -49,6 +49,7 @@ except Exception:
     WEB_ENGINE_AVAILABLE = False
 
 from discord_bot import DiscordBotService
+from telegram_bot import TelegramBotService
 from gesture_utils import estimate_gesture_state, GestureTracker
 from smart_home import SmartHomeService
 from smart_home_page_new import BrahmaHomePage, _DeviceTile
@@ -66,6 +67,7 @@ CONFIG_DIR = get_user_data_dir() / "config"
 API_FILE   = CONFIG_DIR / "api_keys.json"
 APP_SETTINGS_FILE = CONFIG_DIR / "app_settings.json"
 DISCORD_SETTINGS_FILE = CONFIG_DIR / "discord_bot.json"
+TELEGRAM_SETTINGS_FILE = CONFIG_DIR / "telegram_bot.json"
 LOGO_FILE  = BASE_DIR / "assets" / "Brahma_Lite_Logo.png"
 LOGO_ICO   = BASE_DIR / "assets" / "Brahma_Lite_Logo.ico"
 BACKGROUND_IMAGE_FILE = BASE_DIR / "assets" / "background.png"
@@ -1396,6 +1398,10 @@ def _default_app_settings() -> dict:
         "attention_call_prompts": True,
         "developer_mode_enabled": False,
         "developer_mode_workspace": "",
+        "website_builder_enabled": True,
+        "website_builder_workspace": "",
+        "browser_bridge_enabled": False,
+        "browser_bridge_port": 8766,
     }
 
 
@@ -1405,6 +1411,10 @@ def _default_discord_settings() -> dict:
         "enabled": False,
         "channel_id": "",
     }
+
+
+def _default_telegram_settings() -> dict:
+    return {"bot_token": "", "chat_id": "", "enabled": False}
 
 class _SysMetrics:
     def __init__(self):
@@ -6864,6 +6874,21 @@ class DeveloperModeDialog(QDialog):
         self._enabled_box.setChecked(self._enabled)
         root.addWidget(self._enabled_box)
 
+        self._website_builder_box = QCheckBox("Enable built-in website builder")
+        self._website_builder_box.setChecked(bool(self._settings.get("website_builder_enabled", True)))
+        self._website_builder_box.setToolTip("When off, website prompts use the existing developer workflow instead.")
+        root.addWidget(self._website_builder_box)
+
+        self._browser_bridge_box = QCheckBox("Enable Chrome Companion bridge (localhost only)")
+        self._browser_bridge_box.setChecked(bool(self._settings.get("browser_bridge_enabled", False)))
+        self._browser_bridge_box.setToolTip("Requires restart. Browser page content always needs desktop confirmation.")
+        root.addWidget(self._browser_bridge_box)
+
+        self._pair_browser_btn = QPushButton("Generate Chrome pairing code")
+        self._pair_browser_btn.setToolTip("Enable the bridge, restart Brahma Echo, then enter this one-time code in the Chrome companion.")
+        self._pair_browser_btn.clicked.connect(self._generate_browser_pairing_code)
+        root.addWidget(self._pair_browser_btn)
+
         btn_row = QHBoxLayout()
         btn_row.addStretch()
         cancel = QPushButton("Cancel")
@@ -6882,7 +6907,24 @@ class DeveloperModeDialog(QDialog):
     def _save_and_close(self):
         self._settings["developer_mode_enabled"] = bool(self._enabled_box.isChecked())
         self._settings["developer_mode_workspace"] = self._workspace_edit.text().strip()
+        self._settings["website_builder_enabled"] = bool(self._website_builder_box.isChecked())
+        self._settings["browser_bridge_enabled"] = bool(self._browser_bridge_box.isChecked())
         self.accept()
+
+    def _generate_browser_pairing_code(self):
+        try:
+            from brahma_connect.browser_bridge import BrowserBridge
+            settings_path = get_user_data_dir() / "config" / "app_settings.json"
+            bridge = BrowserBridge(settings_path)
+            code = bridge.issue_pairing_code()
+            QMessageBox.information(
+                self,
+                "Chrome pairing code",
+                "Enter this code in the Brahma Chrome Companion within 5 minutes:\n\n"
+                f"{code}\n\nNever share this code. The bridge remains localhost-only.",
+            )
+        except Exception as exc:
+            QMessageBox.warning(self, "Pairing unavailable", str(exc))
 
     def get_settings(self) -> dict:
         return dict(self._settings)
@@ -10882,6 +10924,30 @@ class SystemConnectivityPage(QWidget):
         ml.addLayout(row)
         lay.addWidget(mobile)
 
+        # Optional companion modules: surfaced in Settings as well as the
+        # compact developer dialog so they are discoverable to normal users.
+        companion = self._card("Optional Companion Modules", "Turn these integrations on only when you want to use them.")
+        cl = companion.layout()
+        self._website_builder_toggle = self._mk_toggle(
+            "Enable built-in website builder",
+            bool(self._load_app_settings().get("website_builder_enabled", True)),
+            self._toggle_website_builder,
+        )
+        self._browser_bridge_toggle = self._mk_toggle(
+            "Enable Chrome Companion bridge (requires restart)",
+            bool(self._load_app_settings().get("browser_bridge_enabled", False)),
+            self._toggle_browser_bridge,
+        )
+        cl.addWidget(self._website_builder_toggle)
+        cl.addWidget(self._browser_bridge_toggle)
+        pairing_row = QHBoxLayout()
+        pairing_row.addWidget(QLabel("Chrome bridge is localhost-only and requires approval on both Chrome and Echo."), 1)
+        self._browser_pairing_btn = QPushButton("Generate pairing code")
+        self._browser_pairing_btn.clicked.connect(self._generate_browser_pairing_code)
+        pairing_row.addWidget(self._browser_pairing_btn)
+        cl.addLayout(pairing_row)
+        lay.addWidget(companion)
+
         # Attention prompts
         attention = self._card("Attention Prompts", "Control incoming message and call alerts.")
         al = attention.layout()
@@ -11010,6 +11076,30 @@ class SystemConnectivityPage(QWidget):
         self._discord_msg.setStyleSheet(f"color: {C.TEXT_DIM};")
         dl.addWidget(self._discord_msg)
         lay.addWidget(discord)
+
+        telegram = self._card("Telegram Bot", "Control Brahma Echo from Telegram. Leave Chat ID blank once, then send /start to pair the first chat.")
+        tl = telegram.layout()
+        telegram_defaults = _default_telegram_settings()
+        try:
+            if TELEGRAM_SETTINGS_FILE.exists():
+                telegram_defaults.update(json.loads(TELEGRAM_SETTINGS_FILE.read_text(encoding="utf-8")))
+        except Exception:
+            pass
+        self._telegram_token = QLineEdit(str(telegram_defaults.get("bot_token") or ""))
+        self._telegram_token.setEchoMode(QLineEdit.EchoMode.Password)
+        self._telegram_token.setPlaceholderText("BotFather token")
+        tl.addWidget(self._telegram_token)
+        self._telegram_chat = QLineEdit(str(telegram_defaults.get("chat_id") or ""))
+        self._telegram_chat.setPlaceholderText("Optional allowed Chat ID")
+        tl.addWidget(self._telegram_chat)
+        self._telegram_save = QPushButton("Save & Start Telegram")
+        self._telegram_save.clicked.connect(self._save_telegram_from_page)
+        tl.addWidget(self._telegram_save)
+        self._telegram_msg = QLabel("Create a bot with @BotFather, paste its token, then send /start to it.")
+        self._telegram_msg.setWordWrap(True)
+        self._telegram_msg.setStyleSheet(f"color: {C.TEXT_DIM};")
+        tl.addWidget(self._telegram_msg)
+        lay.addWidget(telegram)
 
         about = self._card("About Brahma Echo", "Brahma Echo information only.")
         ab = about.layout()
@@ -12039,6 +12129,32 @@ class SystemConnectivityPage(QWidget):
         if self._ctrl() and hasattr(self._ctrl(), "write_log"):
             self._ctrl().write_log(f"SYS: Incoming call prompts {'enabled' if checked else 'disabled'}.")
 
+    def _toggle_website_builder(self, checked: bool):
+        self._set_setting("website_builder_enabled", bool(checked))
+        if self._ctrl() and hasattr(self._ctrl(), "write_log"):
+            self._ctrl().write_log(f"SYS: Website builder {'enabled' if checked else 'disabled'}.")
+
+    def _toggle_browser_bridge(self, checked: bool):
+        self._set_setting("browser_bridge_enabled", bool(checked))
+        if self._ctrl() and hasattr(self._ctrl(), "write_log"):
+            self._ctrl().write_log(
+                f"SYS: Chrome Companion bridge {'will start after restart' if checked else 'will stop after restart'}."
+            )
+
+    def _generate_browser_pairing_code(self):
+        try:
+            from brahma_connect.browser_bridge import BrowserBridge
+            settings_path = get_user_data_dir() / "config" / "app_settings.json"
+            code = BrowserBridge(settings_path).issue_pairing_code()
+            QMessageBox.information(
+                self,
+                "Chrome pairing code",
+                "Enter this code in the Brahma Chrome Companion within 5 minutes:\n\n"
+                f"{code}\n\nNever share this code. The bridge is localhost-only.",
+            )
+        except Exception as exc:
+            QMessageBox.warning(self, "Pairing unavailable", str(exc))
+
     def _preview_animation(self):
         self._preview_progress.setValue(0)
         if hasattr(self, "_preview_timer") and self._preview_timer:
@@ -12082,6 +12198,23 @@ class SystemConnectivityPage(QWidget):
             self._ctrl()._win._stop_discord_bot()
             self._ctrl()._win._start_discord_bot()
             self._discord_status.setText("Bot Status: Restarted")
+
+    def _save_telegram_from_page(self):
+        settings = {
+            "bot_token": self._telegram_token.text().strip(),
+            "chat_id": self._telegram_chat.text().strip(),
+            "enabled": bool(self._telegram_token.text().strip()),
+        }
+        try:
+            bridge = self._ctrl()
+            if bridge and hasattr(bridge, "configure_telegram"):
+                bridge.configure_telegram(settings)
+            else:
+                os.makedirs(CONFIG_DIR, exist_ok=True)
+                TELEGRAM_SETTINGS_FILE.write_text(json.dumps(settings, indent=4), encoding="utf-8")
+            self._telegram_msg.setText("Telegram saved. Send /start in the configured chat to verify it.")
+        except Exception as exc:
+            self._telegram_msg.setText(f"Telegram configuration error: {exc}")
 
     def _restart_app(self):
         if self._ctrl() and hasattr(self._ctrl(), "_restart_app"):
@@ -13656,9 +13789,15 @@ class BrahmaUI:
             log_callback=self._win._log_sig.emit,
         )
         self._discord_service.bind_app_submitter(self._win.submit_command)
+        self._telegram_service = TelegramBotService(
+            status_callback=self._win._log_sig.emit,
+            log_callback=self._win._log_sig.emit,
+        )
+        self._telegram_service.bind_app_submitter(self._win.submit_command)
         self._win.discord_config_changed.connect(self._on_discord_config_changed)
         self._win.on_chat_event = self._on_chat_event
         self._app.aboutToQuit.connect(self._discord_service.stop)
+        self._app.aboutToQuit.connect(self._telegram_service.stop)
         self._launcher = FloatingLauncher()
         self._command_bar = CommandBar()
         self._workspace_sidebar = WorkspaceSidebar()
@@ -13700,6 +13839,7 @@ class BrahmaUI:
         if inline_workspace is not None:
             self._win._task_workspace_sig.connect(inline_workspace.apply_task_workspace)
         self._on_discord_config_changed(self._win._load_discord_settings())
+        self.configure_telegram(self._load_telegram_settings())
         launcher_pos = self._load_app_settings().get("launcher_pos")
         if isinstance(launcher_pos, (list, tuple)) and len(launcher_pos) == 2:
             try:
@@ -13833,6 +13973,32 @@ class BrahmaUI:
         if (settings.get("bot_token") or "").strip():
             settings["enabled"] = True
         return dict(settings)
+
+    def _load_telegram_settings(self) -> dict:
+        settings = _default_telegram_settings()
+        if TELEGRAM_SETTINGS_FILE.exists():
+            try:
+                data = json.loads(TELEGRAM_SETTINGS_FILE.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    settings.update(data)
+            except Exception:
+                pass
+        settings["bot_token"] = (settings.get("bot_token") or os.environ.get("TELEGRAM_BOT_TOKEN", "")).strip()
+        settings["chat_id"] = (settings.get("chat_id") or os.environ.get("TELEGRAM_CHAT_ID", "")).strip()
+        return settings
+
+    def configure_telegram(self, settings: dict) -> None:
+        settings = {**_default_telegram_settings(), **(settings or {})}
+        os.makedirs(CONFIG_DIR, exist_ok=True)
+        TELEGRAM_SETTINGS_FILE.write_text(json.dumps(settings, indent=4), encoding="utf-8")
+        token = str(settings.get("bot_token") or "").strip()
+        if not bool(settings.get("enabled") or token) or not token:
+            self._telegram_service.stop()
+            return
+        try:
+            self._telegram_service.start(token, str(settings.get("chat_id") or ""))
+        except Exception as exc:
+            self._win._log_sig.emit(f"ERR: Telegram configuration failed: {exc}")
 
     def _save_discord_settings(self, settings: dict):
         os.makedirs(CONFIG_DIR, exist_ok=True)
@@ -14168,6 +14334,10 @@ class BrahmaUI:
     def _on_chat_event(self, event: dict):
         try:
             self._discord_service.mirror_chat_event(event or {})
+        except Exception:
+            pass
+        try:
+            self._telegram_service.mirror_chat_event(event or {})
         except Exception:
             pass
         try:

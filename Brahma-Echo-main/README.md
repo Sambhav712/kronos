@@ -360,6 +360,18 @@ Core configuration files:
 
 ## Plugin System
 
+## Optional Website Builder and Chrome Companion
+
+The website builder is built into Echo and can be switched on or off from **Developer Mode**. When enabled, commands such as *"build a website for my cafe"* create editable source files in the configured website workspace (default: `Documents\\BrahmaAI\\Websites`). Existing folders with non-website files require confirmation, and the result supports Echo's undo flow.
+
+The Chrome companion stays a separate Manifest V3 extension. Its desktop bridge is **off by default**, listens only on `127.0.0.1:8766`, has no API-key access, and accepts only page summaries or Word-report requests. To enable it:
+
+1. In Echo, open **Developer Mode**, enable **Chrome Companion bridge**, save, and restart Echo.
+2. Generate a pairing code in the same dialog and enter it in the Chrome companion Settings page within five minutes.
+3. Use the extension's explicit “Send page summary” or “Create Word report” action. Echo shows a second HUD confirmation before it uses page content.
+
+To turn either feature off, uncheck its option in Developer Mode and restart Echo. To revoke a Chrome pairing, delete `browser_bridge_tokens` from `%LOCALAPPDATA%\\BrahmaAI\\config\\app_settings.json` while Echo is closed, then restart it. No extension feature depends on the bridge, so the browser companion continues working independently when it is disabled.
+
 Extend Brahma Echo with custom Python plugins by adding files to `plugins/`.
 
 Supported hooks:

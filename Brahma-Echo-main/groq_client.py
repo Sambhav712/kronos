@@ -11,9 +11,11 @@ import json
 import sys
 import time
 import base64
+import io
 import logging
 from pathlib import Path
 from typing import Optional
+import wave
 
 import requests
 
@@ -58,6 +60,13 @@ VISION_MODELS: list[str] = [
 ]
 
 API_URL               = "https://api.groq.com/openai/v1/chat/completions"
+TRANSCRIPTION_API_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
+STT_LANGUAGE          = "hi"
+STT_PROMPT            = (
+    "यह हिंदी और हिंग्लिश में Brahma Echo के voice commands हैं। "
+    "Brahma Echo, Chrome, WhatsApp, Instagram, YouTube, Spotify और Windows "
+    "जैसे नाम सही लिखें।"
+)
 DEFAULT_MAX_TOKENS    = 4096
 DEFAULT_TEMPERATURE   = 0.7
 REQUEST_TIMEOUT       = 60
@@ -85,6 +94,35 @@ class GroqClient:
     def is_configured(self) -> bool:
         """Return True if a Groq API key is present."""
         return bool(self.api_key)
+
+    def transcribe_pcm(self, pcm: bytes, sample_rate: int = 16000) -> str:
+        """Transcribe a mono int16 PCM utterance with Whisper Large V3 Turbo."""
+        if not self.api_key:
+            raise PermissionError("[Groq STT] API key is missing. Add a valid gsk_ key in Settings.")
+        if not pcm:
+            return ""
+        wav_bytes = io.BytesIO()
+        with wave.open(wav_bytes, "wb") as wav_file:
+            wav_file.setnchannels(1)
+            wav_file.setsampwidth(2)
+            wav_file.setframerate(int(sample_rate))
+            wav_file.writeframes(pcm)
+        response = requests.post(
+            TRANSCRIPTION_API_URL,
+            headers={"Authorization": f"Bearer {self.api_key}"},
+            data={
+                "model": "whisper-large-v3-turbo",
+                "response_format": "json",
+                "temperature": "0",
+                "language": STT_LANGUAGE,
+                "prompt": STT_PROMPT,
+            },
+            files={"file": ("brahma-voice.wav", wav_bytes.getvalue(), "audio/wav")},
+            timeout=30,
+        )
+        if response.status_code != 200:
+            raise RuntimeError(f"[Groq STT] HTTP {response.status_code}: {response.text[:200]}")
+        return str(response.json().get("text") or "").strip()
 
     def _is_rate_limited(self, model: str) -> bool:
         ts = _rate_limited.get(model)
